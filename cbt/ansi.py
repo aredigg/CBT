@@ -18,6 +18,7 @@ class ANSI:
 
     @staticmethod
     def color(hex: str) -> str:
+        hex = hex.removeprefix("#")
         code = ""
         if len(hex) == 6:
             try:
