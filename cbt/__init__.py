@@ -7,6 +7,15 @@ class Config:
     settings = {}
     logger = None
 
+    POLL = 0.05
+    KILL = 1.00
+
+    REC = "RECORDING"
+
+    MSG_DISP = -1
+    MSG_SLOT = -2
+    MSG_CHAN = -3
+
     ydl_defaults = {
         "ignoreerrors": True,
         "live_from_start": False,

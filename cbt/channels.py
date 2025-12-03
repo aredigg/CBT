@@ -104,17 +104,17 @@ class Channels:
     def __slot_callback(self, q):
         while self.__running:
             try:
-                receiver, response = q.get(timeout=0.1)
-                if receiver == -3:
+                receiver, response = q.get(timeout=Config.POLL)
+                if receiver == Config.MSG_CHAN:
                     if isinstance(response, Channel):
                         for i in range(len(self.__channels)):
                             if self.__channels[i].name == response.name:
                                 self.__channels[i] = response
                 else:
                     q.put((receiver, response))
-                time.sleep(0.05)
+                time.sleep(Config.POLL)
             except queue.Empty:
-                time.sleep(0.5)
+                pass
 
     def __add_channels(self) -> bool:
         if channels_file := Config.getstr("channels_file"):
@@ -201,12 +201,12 @@ class Channels:
                         channel_index = 0
             except KeyboardInterrupt:
                 controller.halt()
-                time.sleep(0.1)
+                time.sleep(Config.KILL)
                 self.__running = False
         for slot in slots:
             slot.shutdown()
         subprocess_monitor.shutdown()
-        time.sleep(0.5)
+        time.sleep(Config.KILL)
         self.__save_channels()
         return self.__status_value == 0
 

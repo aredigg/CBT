@@ -1,12 +1,10 @@
-import subprocess
 from dataclasses import dataclass, replace
-from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import RejectedVideoReached
 
-from . import Config, util
+from . import Config
 from .logger import Logger
 
 if TYPE_CHECKING:
@@ -66,27 +64,6 @@ class StatusBarMessage:
     message: str
 
 
-class PopenCapture:
-    __real_Popen = subprocess.Popen
-
-    def __init__(self, callback) -> None:
-        self.__callback = callback
-
-    def __call__(self, *args, **kwds):
-        p = PopenCapture.__real_Popen(args, **kwds)
-        cmd_str = str(args)
-        if "ffmpeg" in cmd_str:
-            self.__callback(p.pid)
-        return p
-
-
-@dataclass
-class CapturedProcess:
-    slot_index: int
-    pid: int
-    time: datetime
-
-
 class Processor:
     def __init__(self, slot_index, lock, queue) -> None:
         self.__slot_index = slot_index
@@ -104,7 +81,6 @@ class Processor:
         else:
             self.__logger = Logger()
         self.__minimum_duration: int = (Config.getint("minimum_duration") or 15) * 60
-        subprocess.Popen = PopenCapture(self.__capture)
         options = Config.ydl_defaults
         options["logger"] = self.__logger
         options["progress_hooks"] = [self.__common_hook]
@@ -156,21 +132,24 @@ class Processor:
             finally:
                 try:
                     self.__response_queue.put(
-                        (-1, StatusBarMessage(important="Notice", message=f"Releasing lock (Slot {self.__slot_index})"))
+                        (
+                            Config.MSG_DISP,
+                            StatusBarMessage(important="Notice", message=f"Releasing lock (Slot {self.__slot_index})"),
+                        )
                     )
                     self.__process_lock.release()
                     self.__process_lock_status = False
                     self.__response_queue.put(
-                        (-1, StatusBarMessage(important="Notice", message=f"Released lock (Slot {self.__slot_index})"))
+                        (
+                            Config.MSG_DISP,
+                            StatusBarMessage(important="Notice", message=f"Released lock (Slot {self.__slot_index})"),
+                        )
                     )
                 except AssertionError:
                     pass  # lock not owned
                 except ValueError:
                     pass
         return not bool(result), ("", "", response_message)
-
-    def __capture(self, pid):
-        self.__response_queue.put((-2, CapturedProcess(slot_index=self.__slot_index, pid=pid, time=util.get_time())))
 
     def __common_hook(self, data):
         self.__current = CurrentChannel(
@@ -181,6 +160,8 @@ class Processor:
             )
         )
         self.__response_queue.put((self.__slot_index, replace(self.__current)))
+        if self.__current.elapsed and self.__current.downloaded_bytes:
+            self.__current.tbr = int((self.__current.downloaded_bytes * 8 / self.__current.elapsed) / 1024)
         if self.__current.processor == "progress" and self.__current.status == "finished":
             if self.__current.elapsed < self.__minimum_duration:
                 self.__current.elapsed = int(self.__current.elapsed)
@@ -188,12 +169,18 @@ class Processor:
                     f"Duration too short, {self.__current.elapsed / 60:02.0f}:{self.__current.elapsed % 60:02.0f}"
                 )
             self.__response_queue.put(
-                (-1, StatusBarMessage(important="Notice", message=f"Acquiring lock (Slot {self.__slot_index})"))
+                (
+                    Config.MSG_DISP,
+                    StatusBarMessage(important="Notice", message=f"Acquiring lock (Slot {self.__slot_index})"),
+                )
             )
             self.__process_lock_status = True
             self.__process_lock.acquire()
             self.__response_queue.put(
-                (-1, StatusBarMessage(important="Notice", message=f"Acquired lock (Slot {self.__slot_index})"))
+                (
+                    Config.MSG_DISP,
+                    StatusBarMessage(important="Notice", message=f"Acquired lock (Slot {self.__slot_index})"),
+                )
             )
 
     def __get_status(self, data):

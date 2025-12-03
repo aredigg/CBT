@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+from .ansi import ANSI
+
 
 def str_time(dt) -> datetime:
     return datetime.strptime(dt, "%Y-%m-%d %H:%M:%SZ") if isinstance(dt, str) else dt
@@ -25,7 +27,7 @@ def get_time(posix=0) -> datetime:
 
 def get_difference(dt_a: datetime | None, dt_b: datetime | None = None) -> str:
     if dt_a is None:
-        return " "
+        return ANSI.Dim + "00:00:00" + ANSI.ResetDim
     if dt_b is None:
         dt_b = get_time()
     delta = abs(dt_b - dt_a)

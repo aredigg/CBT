@@ -7,6 +7,7 @@ class ANSI:
     ReturnScreen = "\033[?25h\033[?1049l"
 
     DefaultColor = "\033[39m"
+    BGDefaultColor = "\033[49m"
 
     Blink = "\033[5m"
     ResetBlink = "\033[25m"
@@ -41,6 +42,15 @@ class ANSI:
             except ValueError:
                 pass
         return code
+
+    @staticmethod
+    def gray(pct: int, bg: bool = False) -> str:
+        val = 0
+        if 0 <= pct <= 100:
+            val = int(pct * 24 / 100)
+        if bg:
+            return f"\033[48;5;{232 + val}m"
+        return f"\033[38;5;{232 + val}m"
 
     Red = "\033[31m"
     Yellow = "\033[33m"

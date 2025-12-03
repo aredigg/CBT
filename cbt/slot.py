@@ -1,6 +1,7 @@
 import os
 import queue
 import signal
+import subprocess
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -8,7 +9,7 @@ from multiprocessing import Process, Queue
 from threading import Lock, Thread
 
 from . import Config, util
-from .processor import CapturedProcess, Processor
+from .processor import Processor, StatusBarMessage
 
 
 @dataclass
@@ -24,6 +25,14 @@ class CurrentSlot:
     status_message: tuple[str, str, str]
 
 
+@dataclass
+class CapturedProcess:
+    slot_index: int
+    pid: int
+    children: list[int] | None
+    time: datetime
+
+
 class SubprocessMonitor:
     def __init__(self, response_queue: Queue) -> None:
         self.__response_queue = response_queue
@@ -36,33 +45,86 @@ class SubprocessMonitor:
     def __monitor_loop(self):
         while not self.__shutdown:
             try:
-                receiver, response = self.__response_queue.get(timeout=1.0)
-                if receiver == -2:
+                receiver, response = self.__response_queue.get(timeout=Config.POLL)
+                if receiver == Config.MSG_SLOT:
                     if isinstance(response, CapturedProcess):
                         self.__subprocesses[response.slot_index] = response
+                        self.__response_queue.put(
+                            (
+                                Config.MSG_DISP,
+                                StatusBarMessage(
+                                    important="Notice",
+                                    message=f"Captured Process PID {response.pid} (Slot {response.slot_index + 1})",
+                                ),
+                            )
+                        )
+                    elif isinstance(response, int):
+                        self.__kill_process(response)
                 else:
                     self.__response_queue.put((receiver, response))
             except queue.Empty:
-                time.sleep(0.5)
+                pass
+            self.__scan_for_children()
+            self.__process_dead_processes()
+            time.sleep(Config.POLL)
 
-            dead_processes = []
-            for slot_index, sub in list(self.__subprocesses.items()):
+    def __scan_for_children(self):
+        for slot_index, sub in self.__subprocesses.items():
+            if sub.pid and sub.children is None:
+                child_pids = (
+                    subprocess.run(["pgrep", "-P", str(sub.pid)], capture_output=True, text=True)
+                    .stdout.strip()
+                    .split("\n")
+                )
+                # We could check for ffmpeg, but actually all children should be killed
+                children = [int(c) for c in child_pids if c.isnumeric()]
+                if children:
+                    self.__subprocesses[slot_index] = CapturedProcess(
+                        slot_index=slot_index, pid=sub.pid, children=children, time=util.get_time()
+                    )
+                    self.__response_queue.put((slot_index, Config.REC))
+                    self.__response_queue.put(
+                        (
+                            Config.MSG_DISP,
+                            StatusBarMessage(
+                                important="Notice",
+                                message=f"Captured Child Process PIDs {','.join(child_pids)} (Slot {slot_index + 1})",
+                            ),
+                        )
+                    )
+
+    def __process_dead_processes(self):
+        dead_processes = []
+        for slot_index, sub in self.__subprocesses.items():
+            for pid in sub.children or []:
                 try:
-                    os.kill(sub.pid, 0)
+                    os.kill(pid, 0)
                     elapsed_seconds = (util.get_time() - sub.time).total_seconds()
                     if elapsed_seconds > self.__hung_process_timeout:
-                        os.kill(sub.pid, signal.SIGTERM)
-                        time.sleep(60)
-                        os.kill(sub.pid, signal.SIGKILL)
+                        os.kill(pid, signal.SIGTERM)
+                        time.sleep(Config.KILL)
+                        os.kill(pid, 0)
+                        os.kill(pid, signal.SIGKILL)
                         dead_processes.append(slot_index)
                 except OSError:
                     dead_processes.append(slot_index)
+        for slot_index in dead_processes:
+            if slot_index in self.__subprocesses:
+                self.__subprocesses[slot_index].children = None
+                self.__response_queue.put((slot_index, None))
 
-            for slot_index in dead_processes:
-                if slot_index in self.__subprocesses:
-                    del self.__subprocesses[slot_index]
-                    self.__response_queue.put((slot_index, None))
-            time.sleep(1.0)
+    def __kill_process(self, slot_index: int):
+        if slot_index in self.__subprocesses:
+            sub = self.__subprocesses[slot_index]
+            for pid in sub.children or []:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    time.sleep(Config.KILL)
+                    os.kill(pid, 0)
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                    self.__subprocesses[slot_index].children = None
 
     def shutdown(self):
         self.__shutdown = True
@@ -90,11 +152,15 @@ class Slot:
         self.__process.start()
         self.__callback = Thread(target=self.__worker_callback, daemon=True)
         self.__callback.start()
+        pid = self.__process.pid or 0
+        self.__response_queue.put(
+            (Config.MSG_SLOT, CapturedProcess(slot_index=self.__index, pid=pid, children=None, time=util.get_time()))
+        )
 
     def __worker_callback(self):
         while not self.__shutdown:
             try:
-                slot_index, channel_status = self.__response_queue.get(timeout=0.05)
+                slot_index, channel_status = self.__response_queue.get(timeout=Config.POLL)
                 if slot_index == self.__index and channel_status is None:
                     if self.__busy:
                         self.__busy = False
@@ -102,9 +168,9 @@ class Slot:
                             self.__active_channel = None
                 else:
                     self.__response_queue.put((slot_index, channel_status))
-                time.sleep(0.05)
+                time.sleep(Config.POLL)
             except queue.Empty:
-                time.sleep(0.05)
+                pass
 
     def busy(self) -> bool:
         return self.__busy
@@ -170,10 +236,10 @@ def worker_process(slot_index: int, prefix: str, chn_queue: Queue, res_queue: Qu
             else:
                 channel.last_error = util.get_time()
                 channel.last_error_message = slot_status.status_message[2]
-            res_queue.put((-3, replace(channel)))
+            res_queue.put((Config.MSG_CHAN, replace(channel)))
             res_queue.put((slot_index, replace(slot_status)))
             res_queue.put((slot_index, None))
-            time.sleep(0.2)
+            time.sleep(Config.POLL)
         except KeyboardInterrupt:
             active = False
-            time.sleep(0.2)
+            time.sleep(Config.POLL)

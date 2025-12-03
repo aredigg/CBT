@@ -10,7 +10,7 @@ from importlib.metadata import version
 from shutil import get_terminal_size as size
 from threading import Thread
 
-from . import __program_name__, __version__, util
+from . import Config, __program_name__, __version__, util
 from .ansi import ANSI
 from .processor import CurrentChannel, StatusBarMessage
 from .slot import CurrentSlot
@@ -63,7 +63,7 @@ class DisplayController:
     )
     slot_columns_len = [4, 10, 1, 8, 10, 7, 1, 20]
     assert len(slot_columns_len) == len(fields(SlotColumns))
-    POSTPROCESSES = {"Merger": "merging", "MoveFiles": "moving", "FixupM3u8": "adjusting", "": "Unknown"}
+    POSTPROCESSES = {"Merger": "Merge", "MoveFiles": "Move", "FixupM3u8": "Normalize", "": "Unknown"}
 
     def __init__(self, queue, debug_queue=None) -> None:
         self.__response_queue = queue
@@ -94,13 +94,11 @@ class DisplayController:
                 try:
                     if select.select([sys.stdin], [], [], 0)[0] and self.__check_keypress(display.status_bar_update):
                         break
-                    slot_index, response = self.__response_queue.get(timeout=0.1)
-                    if response is None:
-                        self.__response_queue.put((slot_index, response))
-                    elif slot_index < 0:
+                    slot_index, response = self.__response_queue.get(timeout=Config.POLL)
+                    if slot_index == Config.MSG_DISP:
                         if isinstance(response, StatusBarMessage):
                             display.status_bar_update(important=response.important, message=response.message)
-                    else:
+                    elif slot_index >= 0 and response is not None:
                         if slot_index not in self.__slot_columns:
                             self.__slot_columns[slot_index] = SlotStatus(
                                 slot=self.__create_channel_slot(slot_index), start=None, is_downloading=False
@@ -108,11 +106,13 @@ class DisplayController:
                             display.update_slot(slot_index, self.__slot_columns[slot_index].slot)
                         self.__process_response(slot_index, response)
                         dirty = True
-                    time.sleep(0.05)
+                    else:
+                        self.__response_queue.put((slot_index, response))
+                    time.sleep(Config.POLL)
                 except KeyboardInterrupt:
                     raise KeyboardInterrupt
                 except queue.Empty:
-                    time.sleep(0.05)
+                    pass
                 if display.check_size_changed() or self.__update_timer() or dirty:
                     display.update()
                     dirty = False
@@ -138,9 +138,11 @@ class DisplayController:
             dl = self.__update_slot_slot(slot_index, response)
             if response.is_downloading:
                 # This is only true when download is initiating
-                self.__slot_columns[slot_index].start = util.get_time()
+                self.__slot_columns[slot_index].start = None
                 self.__slot_columns[slot_index].slot.timer = " "
             self.__slot_columns[slot_index].is_downloading = dl
+        if response == Config.REC:
+            self.__slot_columns[slot_index].start = util.get_time()
 
     def __update_slot_slot(self, slot_index, current_slot: CurrentSlot):
         current = self.__slot_columns[slot_index].slot
@@ -150,7 +152,7 @@ class DisplayController:
         current.channel = current_slot.channel_name
         current.rank = self.__get_rank(current_slot.channel_rank)
         current.slot = f"{slot_index + 1:>3}"
-        current.status = StatusIcons.downloading if current_slot.is_downloading else StatusIcons.inactive
+        current.status = StatusIcons.processing if current_slot.is_downloading else StatusIcons.inactive
         if current_slot.has_error:
             current.status = StatusIcons.error
             extractor, channel, message = current_slot.status_message
@@ -194,8 +196,15 @@ class DisplayController:
             self.__loop_counter = DisplayController.loop_counter_init
             for slot_index in self.__slot_columns:
                 if self.__slot_columns[slot_index].is_downloading:
-                    if self.__slot_columns[slot_index].start is None:
-                        self.__slot_columns[slot_index].start = util.get_time()
+                    current = self.__slot_columns[slot_index].slot
+                    current.status = (
+                        StatusIcons.processing
+                        if self.__slot_columns[slot_index].start is None
+                        else StatusIcons.downloading
+                    )
+
+                    # if self.__slot_columns[slot_index].start is None:
+                    #     self.__slot_columns[slot_index].start = util.get_time()
                     self.__slot_columns[slot_index].slot.timer = util.get_difference(
                         self.__slot_columns[slot_index].start
                     )
@@ -218,6 +227,13 @@ class DisplayController:
             message_handler("Shutting down (KeyboardInterrupt)...")
             self.__listening = False
             return True
+        if keypress in map(str, range(10)):
+            try:
+                slot_index = int(keypress) - 1
+                self.__response_queue.put((slot_index, None))
+                message_handler(f"Halting slot {keypress}...")
+            except ValueError:
+                message_handler(f"Halting slot {keypress} not possible...")
         return False
 
 
@@ -382,8 +398,24 @@ class Display:
                 main_message = self.__status_bar_text[1]
             else:
                 main_message = self.__status_bar_text[0]
-            result = ANSI.pos(y=self.__h) + " ► " + self.__status_bar_time + " " + important + main_message
-            result = ANSI.trim(result, self.__w, pad=True)
+            result = (
+                ANSI.pos(y=self.__h)
+                + ANSI.gray(pct=75, bg=True)
+                + ANSI.gray(pct=0, bg=False)
+                + " ► "
+                + self.__status_bar_time
+                + " "
+                + ANSI.gray(pct=95, bg=True)
+                + ANSI.Bold
+                + " "
+                + important
+                + ANSI.ResetBold
+                + ANSI.gray(pct=75, bg=True)
+                + " "
+                + main_message
+            )
+            result = ANSI.trim(result, self.__w, pad=True) + ANSI.BGDefaultColor + ANSI.DefaultColor
+
             if self.__active:
                 print(result, end="")
 
