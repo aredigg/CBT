@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+import time
 
 from . import Config
 from .channels import Channels
@@ -27,8 +28,13 @@ def main(args: list[str]) -> int:
 
     channels = Channels()
     channels.manager()
+    for n in range(5, 0, -1):
+        print(f"{n}...\033[0m\033[0K\033[1F")
+        time.sleep(Config.KILL)
     if channels.status() > 0:
         print(channels.status_message())
+    else:
+        print("OK...\033[0m\033[0K\033[1F")
     return channels.status()
 
 

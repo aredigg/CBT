@@ -4,19 +4,28 @@ from .ansi import ANSI
 
 
 def str_time(dt) -> datetime:
-    return datetime.strptime(dt, "%Y-%m-%d %H:%M:%SZ") if isinstance(dt, str) else dt
+    try:
+        return datetime.strptime(dt, "%Y-%m-%d %H:%M:%S") if isinstance(dt, str) else dt
+    except ValueError:
+        return datetime.strptime(dt, "%Y-%m-%d %H:%M:%SZ") if isinstance(dt, str) else dt
 
 
 def time_str(dt: datetime | None = None) -> str:
     if dt is None:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
-    return dt.strftime("%Y-%m-%d %H:%M:%SZ")
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def time_datestr(dt: datetime | None = None) -> str:
     if dt is None:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return dt.strftime("%Y-%m-%d")
+
+
+def time_timestr(dt: datetime | None = None) -> str:
+    if dt is None:
+        return datetime.now(timezone.utc).strftime("%H:%M")
+    return dt.strftime("%H:%M")
 
 
 def get_time(posix=0) -> datetime:
@@ -42,3 +51,7 @@ def same_date(dt_a: datetime, dt_b: datetime | None = None) -> bool:
 
 def hours_ago(dt: datetime, hrs) -> bool:
     return dt < get_time() - timedelta(hours=hrs)
+
+
+def mins_ago(dt: datetime, mins=1) -> bool:
+    return dt < get_time() - timedelta(minutes=mins)

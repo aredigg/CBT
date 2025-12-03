@@ -9,7 +9,8 @@ from multiprocessing import Process, Queue
 from threading import Lock, Thread
 
 from . import Config, util
-from .processor import Processor, StatusBarMessage
+from .display import StatusBarMessage
+from .processor import Processor
 
 
 @dataclass

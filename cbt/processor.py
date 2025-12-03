@@ -1,67 +1,15 @@
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import RejectedVideoReached
 
 from . import Config
+from .display import CurrentChannel, StatusBarMessage
 from .logger import Logger
 
 if TYPE_CHECKING:
     from yt_dlp import _Params
-
-
-@dataclass
-class CurrentChannel:
-    id: str
-    title: str
-    thumbnail: str
-    is_live: bool
-    age_limit: int
-    webpage_url: str
-    original_url: str
-    webpage_url_basename: str
-    webpage_url_domain: str
-    extractor: str
-    extractor_key: str
-    playlist: str
-    playlist_index: int
-    display_id: str
-    fulltitle: str
-    release_year: str
-    live_status: str
-    epoch: int
-    _filename: str
-    _real_download: bool
-    _finaldir: str
-    filepath: str
-    _files_to_move: str
-    width: int
-    height: int
-    fps: int
-    asr: int
-    audio_channels: int
-    dynamic_range: str
-    vcodec: str
-    acodec: str
-    ext: str
-    format_id: str
-    protocol: str
-    tbr: int
-    status: str
-    processor: str
-    filename: str
-    elapsed: float
-    downloaded_bytes: int
-    total_bytes: int
-    speed: float
-    _percent: float
-
-
-@dataclass
-class StatusBarMessage:
-    important: str
-    message: str
 
 
 class Processor:

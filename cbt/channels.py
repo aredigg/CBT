@@ -6,8 +6,11 @@ from datetime import datetime
 from multiprocessing import Queue, RLock
 from threading import Thread
 
+from cbt.ansi import ANSI
+
 from . import Config, util
-from .display import DisplayController
+from .display import DisplayController, HealthBar, StatusBarMessage
+from .health import Health
 from .slot import Slot, SubprocessMonitor
 
 
@@ -65,6 +68,8 @@ class Channels:
         self.__status_value = 0
         self.__status = None
         self.__running = True
+        self.__health_interval = Config.getint("health_interval") or 1
+        self.__last_health_check = None
         self.__channels = []
         self.__prefix = None
         self.__offline_window = Config.getint("offline_window")
@@ -178,16 +183,18 @@ class Channels:
         slots = []
         lock = RLock()
         q = Queue()
+        controller = DisplayController(q)
         callback = Thread(target=self.__slot_callback, args=[q], daemon=True)
         callback.start()
-        controller = DisplayController(q)
         subprocess_monitor = SubprocessMonitor(q)
         slots = self.__create_slots(q, lock)
         self.__running = True
         offline_checkpoint = util.get_time()
         channel_index = 0
+        health = Health()
         while self.__running and self.__status_value == 0:
             try:
+                self.__health_check(q, health)
                 for slot in slots:
                     channel_index, channel = self.__next_channel(channel_index, slots)
                     if controller.shutdown_requested():
@@ -200,14 +207,14 @@ class Channels:
                         offline_checkpoint = util.get_time()
                         channel_index = 0
             except KeyboardInterrupt:
-                controller.halt()
                 time.sleep(Config.KILL)
                 self.__running = False
         for slot in slots:
             slot.shutdown()
         subprocess_monitor.shutdown()
-        time.sleep(Config.KILL)
         self.__save_channels()
+        controller.halt()
+        controller = None
         return self.__status_value == 0
 
     def status(self) -> int:
@@ -217,3 +224,78 @@ class Channels:
         if self.__status:
             return self.__status
         return "OK"
+
+    def __health_check(self, q, health: Health):
+        if not self.__last_health_check or util.mins_ago(self.__last_health_check, self.__health_interval):
+            self.__last_health_check = util.get_time()
+            health_bar = [f"Channels: {len(self.__channels)}"]
+            health_bar.append("| Free space:")
+            drives: dict[str, Health.Drive] = health.disk_health()
+            for drive in drives.values():
+                if drive.low_space:
+                    q.put(
+                        (
+                            Config.MSG_DISP,
+                            StatusBarMessage(
+                                important="Warning",
+                                message=f"Drive space for {drive.directory}: {drive.free_percent:.1%} left",
+                            ),
+                        )
+                    )
+                if not drive.available:
+                    q.put(
+                        (
+                            Config.MSG_DISP,
+                            StatusBarMessage(
+                                important="Warning", message=f"Drive for {drive.directory}: not available"
+                            ),
+                        )
+                    )
+                if drive.inaccesible:
+                    q.put(
+                        (
+                            Config.MSG_DISP,
+                            StatusBarMessage(
+                                important="Warning", message=f"Drive for {drive.directory}: not inaccesible"
+                            ),
+                        )
+                    )
+                health_bar.append(f"{drive.free_percent:.0%}")
+            inet: Health.Internet = health.internet()
+            if inet.error is not None:
+                q.put(
+                    (
+                        Config.MSG_DISP,
+                        StatusBarMessage(
+                            important="Notice",
+                            message=f"Network likely {'up, but' if inet.link_up else 'down,'} with error: {inet.error}",
+                        ),
+                    )
+                )
+            health_bar.append("|")
+            health_bar.append(
+                f"ᯤ{ANSI.Green + '✓' + ANSI.DefaultColor if inet.link_up else ANSI.Red + '✕' + ANSI.DefaultColor}"
+            )
+            health_bar.append(f"({inet.local_addr if inet.local_addr else '✕.✕.✕.✕'})")
+            ytdlp_version: Health.Version = health.ytdlp_version()
+            if ytdlp_version.update_available:
+                q.put(
+                    (
+                        Config.MSG_DISP,
+                        StatusBarMessage(
+                            important="Notice", message=f"YT-DLP has an upgrade available: {ytdlp_version.latest}"
+                        ),
+                    )
+                )
+                health_bar.append(f"| YT-DLP {ytdlp_version.latest} update available")
+            self.__last_healt_check = util.get_time()
+            # health_bar.append("Close slot:")
+            # for n in range(min(10, Config.getint("number_of_slots") or 0)):
+            #     health_bar.append(f"[{n + 1}]")
+            # health_bar.append("[Q] Quit")
+            q.put(
+                (
+                    Config.MSG_DISP,
+                    HealthBar(bar=health_bar),
+                )
+            )

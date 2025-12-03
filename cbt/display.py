@@ -12,8 +12,64 @@ from threading import Thread
 
 from . import Config, __program_name__, __version__, util
 from .ansi import ANSI
-from .processor import CurrentChannel, StatusBarMessage
-from .slot import CurrentSlot
+
+
+@dataclass
+class CurrentChannel:
+    id: str
+    title: str
+    thumbnail: str
+    is_live: bool
+    age_limit: int
+    webpage_url: str
+    original_url: str
+    webpage_url_basename: str
+    webpage_url_domain: str
+    extractor: str
+    extractor_key: str
+    playlist: str
+    playlist_index: int
+    display_id: str
+    fulltitle: str
+    release_year: str
+    live_status: str
+    epoch: int
+    _filename: str
+    _real_download: bool
+    _finaldir: str
+    filepath: str
+    _files_to_move: str
+    width: int
+    height: int
+    fps: int
+    asr: int
+    audio_channels: int
+    dynamic_range: str
+    vcodec: str
+    acodec: str
+    ext: str
+    format_id: str
+    protocol: str
+    tbr: int
+    status: str
+    processor: str
+    filename: str
+    elapsed: float
+    downloaded_bytes: int
+    total_bytes: int
+    speed: float
+    _percent: float
+
+
+@dataclass
+class StatusBarMessage:
+    important: str
+    message: str
+
+
+@dataclass
+class HealthBar:
+    bar: list[str]
 
 
 @dataclass
@@ -84,11 +140,14 @@ class DisplayController:
     def halt(self):
         self.__listening = False
         self.__shutdown_requested = True
+        if self.__update_loop and self.__update_loop.is_alive():
+            self.__update_loop.join(timeout=60.0)
 
     def __control_loop(self):
         with Display(f"{__program_name__} {__version__} (YT-DLP {version('yt_dlp')})") as display:
             display.update_slots_header(DisplayController.slot_headers, DisplayController.slot_columns_len)
             self.__listening = True
+            periodic_refresh = util.get_time()
             dirty = True
             while self.__listening:
                 try:
@@ -98,6 +157,8 @@ class DisplayController:
                     if slot_index == Config.MSG_DISP:
                         if isinstance(response, StatusBarMessage):
                             display.status_bar_update(important=response.important, message=response.message)
+                        if isinstance(response, HealthBar):
+                            display.health_bar_update(bar_text=response.bar)
                     elif slot_index >= 0 and response is not None:
                         if slot_index not in self.__slot_columns:
                             self.__slot_columns[slot_index] = SlotStatus(
@@ -117,6 +178,7 @@ class DisplayController:
                     display.update()
                     dirty = False
                 self.__loop_counter -= 1
+                dirty = dirty or util.mins_ago(periodic_refresh)
 
     def __create_channel_slot(self, slot_index):
         return SlotColumns(
@@ -131,6 +193,8 @@ class DisplayController:
         )
 
     def __process_response(self, slot_index, response):
+        from .slot import CurrentSlot
+
         if isinstance(response, CurrentChannel):
             if self.__update_channel_slot(slot_index, response):
                 self.__slot_columns[slot_index].is_downloading = False
@@ -144,7 +208,7 @@ class DisplayController:
         if response == Config.REC:
             self.__slot_columns[slot_index].start = util.get_time()
 
-    def __update_slot_slot(self, slot_index, current_slot: CurrentSlot):
+    def __update_slot_slot(self, slot_index, current_slot):
         current = self.__slot_columns[slot_index].slot
         current.previous = (
             util.time_datestr(current_slot.previous_download) if current_slot.previous_download is not None else " "
@@ -219,21 +283,21 @@ class DisplayController:
     def __check_keypress(self, message_handler):
         keypress = sys.stdin.read(1)
         if keypress.lower() == "q":
-            message_handler("Shutting down...")
+            message_handler("Notice", "Shutting down...")
             self.__shutdown_requested = True
             self.__listening = False
             return True
         if keypress == "\x03":  # Ctrl+C
-            message_handler("Shutting down (KeyboardInterrupt)...")
+            message_handler("Warning", "Shutting down (KeyboardInterrupt)...")
             self.__listening = False
             return True
         if keypress in map(str, range(10)):
             try:
                 slot_index = int(keypress) - 1
                 self.__response_queue.put((slot_index, None))
-                message_handler(f"Halting slot {keypress}...")
+                message_handler("Notice", f"Halting slot {keypress}...")
             except ValueError:
-                message_handler(f"Halting slot {keypress} not possible...")
+                message_handler("Warning", f"Halting slot {keypress} not possible...")
         return False
 
 
@@ -243,7 +307,7 @@ class Display:
     def __init__(self, header_text) -> None:
         self.__w, self.__h = size()
         self.__header_text = header_text
-        self.__header_status = None
+        self.__header_health_text = None
         self.__slot_header: SlotColumns | None = None
         self.__slot_text: list[SlotColumns] = []
         self.__slot_ticks = []
@@ -257,17 +321,18 @@ class Display:
     def __enter__(self):
         self.__fd = sys.stdin.fileno()
         self.__old = termios.tcgetattr(self.__fd)
-        tty.setraw(self.__fd)  # disables echo + canonical mode
+        tty.setcbreak(self.__fd)  # disables echo + canonical mode
         print(ANSI.SetupClearScreen, end="")
         self.__active = True
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if self.__old and self.__fd:
-            termios.tcsetattr(self.__fd, termios.TCSADRAIN, self.__old)
-        self.__flush_to_screen()
         self.__active = False
         print(ANSI.ReturnScreen, end="")
+        sys.stdout.flush()
+        if self.__old and self.__fd:
+            termios.tcsetattr(self.__fd, termios.TCSADRAIN, self.__old)
+        sys.stdout.flush()
 
     def check_size_changed(self) -> bool:
         if (self.__w, self.__h) != size():
@@ -293,6 +358,9 @@ class Display:
         self.__create_status_line()
         self.__flush_to_screen()
 
+    def health_bar_update(self, bar_text: list[str]):
+        self.__header_health_text = util.time_timestr() + " " + util.time_datestr() + " | " + " ".join(bar_text)
+
     def __flush_to_screen(self):
         print(ANSI.pos(y=1))
 
@@ -307,7 +375,7 @@ class Display:
         self.__create_line(Draw.Rounded, top=True)
         self.__create_text_line(self.__header_text, Draw.Rounded)
         self.__create_line(Draw.Rounded)
-        self.__create_text_line(self.__header_status, Draw.Rounded)
+        self.__create_text_line(self.__header_health_text, Draw.Rounded)
         self.__create_line(Draw.Rounded, top=False)
 
     def update_slots_header(self, header, ticks):
