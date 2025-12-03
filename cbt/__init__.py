@@ -11,6 +11,7 @@ class Config:
     KILL = 1.00
 
     REC = "RECORDING"
+    UNR = "UNRESPONSIVE"
 
     MSG_DISP = -1
     MSG_SLOT = -2

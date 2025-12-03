@@ -24,6 +24,7 @@ class CurrentSlot:
     is_complete: bool
     has_error: bool | None
     status_message: tuple[str, str, str]
+    sequence: int
 
 
 @dataclass
@@ -65,8 +66,8 @@ class SubprocessMonitor:
                     self.__response_queue.put((receiver, response))
             except queue.Empty:
                 pass
-            self.__scan_for_children()
             self.__process_dead_processes()
+            self.__scan_for_children()
             time.sleep(Config.POLL)
 
     def __scan_for_children(self):
@@ -111,6 +112,7 @@ class SubprocessMonitor:
                     dead_processes.append(slot_index)
         for slot_index in dead_processes:
             if slot_index in self.__subprocesses:
+                self.__response_queue.put((slot_index, Config.UNR))
                 self.__subprocesses[slot_index].children = None
                 self.__response_queue.put((slot_index, None))
 
@@ -125,7 +127,8 @@ class SubprocessMonitor:
                     os.kill(pid, signal.SIGKILL)
                 except OSError:
                     pass
-                    self.__subprocesses[slot_index].children = None
+                self.__subprocesses[slot_index].children = None
+                self.__response_queue.put((slot_index, Config.UNR))
 
     def shutdown(self):
         self.__shutdown = True
@@ -140,6 +143,7 @@ class Slot:
         self.__busy: bool = False
         self.__shutdown: bool = False
         self.__active_channel = None
+        self.__current_sequence = -1
         self.__channel_queue: Queue = Queue()
         self.__response_queue: Queue = queue
         self.__postprocess_lock: Lock = lock
@@ -201,6 +205,7 @@ class Slot:
 def worker_process(slot_index: int, prefix: str, chn_queue: Queue, res_queue: Queue, lock: Lock):
     active = True
     processor = Processor(slot_index, lock, res_queue)
+    seq: int = 0
     while active:
         try:
             channel = chn_queue.get()
@@ -217,7 +222,9 @@ def worker_process(slot_index: int, prefix: str, chn_queue: Queue, res_queue: Qu
                 is_complete=False,
                 has_error=None,
                 status_message=("", "", ""),
+                sequence=seq,
             )
+            seq += 1
             channel.last_attempt = util.get_time()
             if processor.extract(prefix, channel.name):
                 channel.last_download = util.get_time()

@@ -89,6 +89,7 @@ class SlotStatus:
     slot: SlotColumns
     start: datetime | None
     is_downloading: bool
+    sequence: int
 
 
 class StatusIcons:
@@ -155,14 +156,14 @@ class DisplayController:
                         break
                     slot_index, response = self.__response_queue.get(timeout=Config.POLL)
                     if slot_index == Config.MSG_DISP:
-                        if isinstance(response, StatusBarMessage):
-                            display.status_bar_update(important=response.important, message=response.message)
-                        if isinstance(response, HealthBar):
-                            display.health_bar_update(bar_text=response.bar)
+                        self.__process_display_response(display, response)
                     elif slot_index >= 0 and response is not None:
                         if slot_index not in self.__slot_columns:
                             self.__slot_columns[slot_index] = SlotStatus(
-                                slot=self.__create_channel_slot(slot_index), start=None, is_downloading=False
+                                slot=self.__create_channel_slot(slot_index),
+                                start=None,
+                                is_downloading=False,
+                                sequence=-1,
                             )
                             display.update_slot(slot_index, self.__slot_columns[slot_index].slot)
                         self.__process_response(slot_index, response)
@@ -192,13 +193,20 @@ class DisplayController:
             channel=" ",
         )
 
+    def __process_display_response(self, display, response):
+        if isinstance(response, StatusBarMessage):
+            display.status_bar_update(important=response.important, message=response.message)
+        if isinstance(response, HealthBar):
+            display.health_bar_update(bar_text=response.bar)
+
     def __process_response(self, slot_index, response):
         from .slot import CurrentSlot
 
         if isinstance(response, CurrentChannel):
             if self.__update_channel_slot(slot_index, response):
                 self.__slot_columns[slot_index].is_downloading = False
-        if isinstance(response, CurrentSlot):
+        if isinstance(response, CurrentSlot) and response.sequence >= self.__slot_columns[slot_index].sequence:
+            self.__slot_columns[slot_index].sequence = response.sequence
             dl = self.__update_slot_slot(slot_index, response)
             if response.is_downloading:
                 # This is only true when download is initiating
@@ -207,6 +215,8 @@ class DisplayController:
             self.__slot_columns[slot_index].is_downloading = dl
         if response == Config.REC:
             self.__slot_columns[slot_index].start = util.get_time()
+        if response == Config.UNR:
+            self.__slot_columns[slot_index].is_downloading = False
 
     def __update_slot_slot(self, slot_index, current_slot):
         current = self.__slot_columns[slot_index].slot
@@ -266,9 +276,6 @@ class DisplayController:
                         if self.__slot_columns[slot_index].start is None
                         else StatusIcons.downloading
                     )
-
-                    # if self.__slot_columns[slot_index].start is None:
-                    #     self.__slot_columns[slot_index].start = util.get_time()
                     self.__slot_columns[slot_index].slot.timer = util.get_difference(
                         self.__slot_columns[slot_index].start
                     )
@@ -277,6 +284,12 @@ class DisplayController:
                             self.__slot_columns[slot_index].slot.timer = (
                                 ANSI.Dim + self.__slot_columns[slot_index].slot.timer + ANSI.ResetDim
                             )
+                else:
+                    self.__slot_columns[slot_index].slot.timer = (
+                        ANSI.Red + self.__slot_columns[slot_index].slot.timer + ANSI.DefaultColor
+                    )
+                    self.__slot_columns[slot_index].slot.status = StatusIcons.error
+
             return True
         return False
 
