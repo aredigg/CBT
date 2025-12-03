@@ -1,0 +1,219 @@
+import os
+import queue
+import time
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from multiprocessing import Queue, RLock
+from threading import Thread
+
+from . import Config, util
+from .display import DisplayController
+from .slot import Slot, SubprocessMonitor
+
+
+@dataclass
+class Channel:
+    name: str
+    rank: int | str | None
+    last_download: datetime | str | None
+    last_complete: datetime | str | None
+    last_attempt: datetime | str | None
+    last_error: datetime | str | None
+    last_error_message: str | None
+    last_resolution: str | None
+    last_bitrate: str | None
+
+    def __post_init__(self):
+        self.rank = int(self.rank) if self.rank is not None else None
+        self.last_download = (
+            util.str_time(self.last_download)
+            if self.last_download is not None and self.last_download != "None"
+            else None
+        )
+        self.last_complete = (
+            util.str_time(self.last_complete)
+            if self.last_complete is not None and self.last_complete != "None"
+            else None
+        )
+        self.last_attempt = (
+            util.str_time(self.last_attempt) if self.last_attempt is not None and self.last_attempt != "None" else None
+        )
+        self.last_error = (
+            util.str_time(self.last_error) if self.last_error is not None and self.last_error != "None" else None
+        )
+        self.last_error_message = self.last_error_message if self.last_error_message != "None" else None
+        self.last_resolution = self.last_resolution if self.last_resolution != "None" else None
+        self.last_bitrate = self.last_bitrate if self.last_bitrate != "None" else None
+
+
+class Channels:
+    __headers = [
+        "# Channel",
+        "Rank",
+        "Last Download",
+        "Last Complete",
+        "Last Attempt",
+        "Last Error",
+        "Last Error Message",
+        "Resolution",
+        "Bitrate",
+    ]
+    __header = ";".join(__headers) + "\n"
+    __header_len = len(__headers)
+
+    def __init__(self) -> None:
+        self.__status_value = 0
+        self.__status = None
+        self.__running = True
+        self.__channels = []
+        self.__prefix = None
+        self.__offline_window = Config.getint("offline_window")
+        try:
+            if channels_file := Config.getstr("channels_file"):
+                with open(channels_file) as f:
+                    self.__channels = [
+                        Channel(*p)
+                        for ln in f
+                        if (s := ln.strip())
+                        and not s.startswith("#")
+                        and (p := s.split(";"))
+                        and len(p) >= Channels.__header_len
+                    ]
+            else:
+                self.__status = "Channels file not set"
+                self.__status_value = 2
+            self.__add_channels()
+        except FileNotFoundError:
+            if not self.__add_channels():
+                self.__status = "Channels file not found"
+                self.__status_value = 1
+        try:
+            if channels_prefix := Config.getstr("channel_prefix"):
+                with open(channels_prefix) as f:
+                    self.__prefix = f.readline().strip()
+            else:
+                self.__status = "Channel prefix file not set"
+                self.__status_value = 2
+        except FileNotFoundError:
+            self.__status = "Channel prefix file not found"
+            self.__status_value = 1
+        if len(self.__channels) < 1:
+            self.__status = "No channels imported"
+            self.__status_value = 3
+
+    def __slot_callback(self, q):
+        while self.__running:
+            try:
+                receiver, response = q.get(timeout=0.1)
+                if receiver == -3:
+                    if isinstance(response, Channel):
+                        for i in range(len(self.__channels)):
+                            if self.__channels[i].name == response.name:
+                                self.__channels[i] = response
+                else:
+                    q.put((receiver, response))
+                time.sleep(0.05)
+            except queue.Empty:
+                time.sleep(0.5)
+
+    def __add_channels(self) -> bool:
+        if channels_file := Config.getstr("channels_file"):
+            try:
+                with open(channels_file + "_") as f:
+                    for ln in f:
+                        if (s := ln.strip().split(";")[0]) and not s.startswith("#"):
+                            self.__channels.append(Channel(s, 5, None, None, None, None, None, None, None))
+                self.__save_channels()
+                os.remove(channels_file + "_")
+            except FileNotFoundError:
+                return False
+        else:
+            return False
+        return True
+
+    def __format(self, value):
+        return util.time_str(value) if isinstance(value, datetime) else str(value)
+
+    def __save_channels(self):
+        if channels_file := Config.getstr("channels_file"):
+            try:
+                with open(channels_file, "w") as f:
+                    f.write(self.__header)
+                    for channel in self.__channels:
+                        f.write(";".join(self.__format(v) for v in asdict(channel).values()) + "\n")
+            except FileNotFoundError:
+                pass
+
+    def __get_rank(self, index: int) -> int:
+        if index <= 25:
+            return 0
+        if index <= 50:
+            return 1
+        if index <= 100:
+            return 2
+        if index <= 200:
+            return 3
+        if index <= 300:
+            return 4
+        return 5
+
+    def __create_slots(self, q, lock) -> list[Slot]:
+        if number_of_slots := Config.getint("number_of_slots"):
+            return [Slot(q, lock, self.__prefix) for _ in range(number_of_slots)]
+        self.__status = "Number of slots not set"
+        self.__status_value = 2
+        return []
+
+    def __next_channel(self, current_index, slots):
+        ch = self.__channels[current_index]
+        while isinstance(ch.last_complete, datetime) and util.same_date(ch.last_complete):
+            current_index = (current_index + 1) % len(self.__channels)
+            ch = self.__channels[current_index]
+        for slot in slots:
+            if slot.check_name(ch.name):
+                current_index, ch = self.__next_channel((current_index + 1) % len(self.__channels), slots)
+        return current_index, ch
+
+    def manager(self) -> bool:
+        slots = []
+        lock = RLock()
+        q = Queue()
+        callback = Thread(target=self.__slot_callback, args=[q], daemon=True)
+        callback.start()
+        controller = DisplayController(q)
+        subprocess_monitor = SubprocessMonitor(q)
+        slots = self.__create_slots(q, lock)
+        self.__running = True
+        offline_checkpoint = util.get_time()
+        channel_index = 0
+        while self.__running and self.__status_value == 0:
+            try:
+                for slot in slots:
+                    channel_index, channel = self.__next_channel(channel_index, slots)
+                    if controller.shutdown_requested():
+                        self.__running = False
+                    if self.__running and not slot.busy():
+                        channel.rank = self.__get_rank(channel_index)
+                        slot.process(channel)
+                        channel_index = (channel_index + 1) % len(self.__channels)
+                    if util.hours_ago(offline_checkpoint, self.__offline_window):
+                        offline_checkpoint = util.get_time()
+                        channel_index = 0
+            except KeyboardInterrupt:
+                controller.halt()
+                time.sleep(0.1)
+                self.__running = False
+        for slot in slots:
+            slot.shutdown()
+        subprocess_monitor.shutdown()
+        time.sleep(0.5)
+        self.__save_channels()
+        return self.__status_value == 0
+
+    def status(self) -> int:
+        return self.__status_value
+
+    def status_message(self) -> str:
+        if self.__status:
+            return self.__status
+        return "OK"
