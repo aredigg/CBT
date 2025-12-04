@@ -260,7 +260,12 @@ class Channels:
                             ),
                         )
                     )
-                health_bar.append(f"{drive.free_percent:.0%}")
+                if not drive.available or drive.inaccesible:
+                    health_bar.append(ANSI.Blink + ANSI.Red + "✕✕✕" + ANSI.DefaultColor + ANSI.ResetBlink)
+                elif drive.low_space:
+                    health_bar.append(ANSI.Red + f"{drive.free_percent:.0%}" + ANSI.DefaultColor)
+                else:
+                    health_bar.append(f"{drive.free_percent:.0%}")
             inet: Health.Internet = health.internet()
             if inet.error is not None:
                 q.put(
@@ -288,11 +293,6 @@ class Channels:
                     )
                 )
                 health_bar.append(f"| YT-DLP {ytdlp_version.latest} update available")
-            self.__last_healt_check = util.get_time()
-            # health_bar.append("Close slot:")
-            # for n in range(min(10, Config.getint("number_of_slots") or 0)):
-            #     health_bar.append(f"[{n + 1}]")
-            # health_bar.append("[Q] Quit")
             q.put(
                 (
                     Config.MSG_DISP,

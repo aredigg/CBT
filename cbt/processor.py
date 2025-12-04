@@ -82,7 +82,9 @@ class Processor:
                     self.__response_queue.put(
                         (
                             Config.MSG_DISP,
-                            StatusBarMessage(important="Notice", message=f"Releasing lock (Slot {self.__slot_index})"),
+                            StatusBarMessage(
+                                important="Notice", message=f"Releasing lock (Slot {self.__slot_index + 1})"
+                            ),
                         )
                     )
                     self.__process_lock.release()
@@ -90,7 +92,9 @@ class Processor:
                     self.__response_queue.put(
                         (
                             Config.MSG_DISP,
-                            StatusBarMessage(important="Notice", message=f"Released lock (Slot {self.__slot_index})"),
+                            StatusBarMessage(
+                                important="Notice", message=f"Released lock (Slot {self.__slot_index + 1})"
+                            ),
                         )
                     )
                 except AssertionError:
@@ -119,7 +123,7 @@ class Processor:
             self.__response_queue.put(
                 (
                     Config.MSG_DISP,
-                    StatusBarMessage(important="Notice", message=f"Acquiring lock (Slot {self.__slot_index})"),
+                    StatusBarMessage(important="Notice", message=f"Acquiring lock (Slot {self.__slot_index + 1})"),
                 )
             )
             self.__process_lock_status = True
@@ -127,7 +131,7 @@ class Processor:
             self.__response_queue.put(
                 (
                     Config.MSG_DISP,
-                    StatusBarMessage(important="Notice", message=f"Acquired lock (Slot {self.__slot_index})"),
+                    StatusBarMessage(important="Notice", message=f"Acquired lock (Slot {self.__slot_index + 1})"),
                 )
             )
 

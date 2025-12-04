@@ -114,7 +114,7 @@ class SubprocessMonitor:
             if slot_index in self.__subprocesses:
                 self.__response_queue.put((slot_index, Config.UNR))
                 self.__subprocesses[slot_index].children = None
-                self.__response_queue.put((slot_index, None))
+                self.__response_queue.put((slot_index, Config.FIN))
 
     def __kill_process(self, slot_index: int):
         if slot_index in self.__subprocesses:
@@ -127,8 +127,9 @@ class SubprocessMonitor:
                     os.kill(pid, signal.SIGKILL)
                 except OSError:
                     pass
-                self.__subprocesses[slot_index].children = None
-                self.__response_queue.put((slot_index, Config.UNR))
+            self.__subprocesses[slot_index].children = None
+            self.__response_queue.put((slot_index, Config.UNR))
+            self.__response_queue.put((slot_index, Config.FIN))
 
     def shutdown(self):
         self.__shutdown = True
@@ -143,7 +144,6 @@ class Slot:
         self.__busy: bool = False
         self.__shutdown: bool = False
         self.__active_channel = None
-        self.__current_sequence = -1
         self.__channel_queue: Queue = Queue()
         self.__response_queue: Queue = queue
         self.__postprocess_lock: Lock = lock
@@ -165,14 +165,12 @@ class Slot:
     def __worker_callback(self):
         while not self.__shutdown:
             try:
-                slot_index, channel_status = self.__response_queue.get(timeout=Config.POLL)
-                if slot_index == self.__index and channel_status is None:
+                slot_index, response = self.__response_queue.get(timeout=Config.POLL)
+                if slot_index == self.__index and response is Config.FIN:
                     if self.__busy:
                         self.__busy = False
-                        if self.__active_channel is not None:
-                            self.__active_channel = None
                 else:
-                    self.__response_queue.put((slot_index, channel_status))
+                    self.__response_queue.put((slot_index, response))
                 time.sleep(Config.POLL)
             except queue.Empty:
                 pass
@@ -193,7 +191,7 @@ class Slot:
 
     def shutdown(self):
         self.__shutdown = True
-        self.__channel_queue.put(None)
+        self.__channel_queue.put(Config.FIN)
 
     def process(self, channel):
         self.__busy = True
@@ -209,7 +207,7 @@ def worker_process(slot_index: int, prefix: str, chn_queue: Queue, res_queue: Qu
     while active:
         try:
             channel = chn_queue.get()
-            if channel is None:
+            if channel is Config.FIN:
                 active = False
                 break
             slot_status = CurrentSlot(
@@ -246,7 +244,7 @@ def worker_process(slot_index: int, prefix: str, chn_queue: Queue, res_queue: Qu
                 channel.last_error_message = slot_status.status_message[2]
             res_queue.put((Config.MSG_CHAN, replace(channel)))
             res_queue.put((slot_index, replace(slot_status)))
-            res_queue.put((slot_index, None))
+            res_queue.put((slot_index, Config.FIN))
             time.sleep(Config.POLL)
         except KeyboardInterrupt:
             active = False

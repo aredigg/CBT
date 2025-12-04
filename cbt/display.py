@@ -229,8 +229,11 @@ class DisplayController:
         current.status = StatusIcons.processing if current_slot.is_downloading else StatusIcons.inactive
         if current_slot.has_error:
             current.status = StatusIcons.error
-            extractor, channel, message = current_slot.status_message
-            current.channel = f"{current_slot.channel_name} {ANSI.Yellow}({message}){ANSI.DefaultColor}"
+            _, channel, message = current_slot.status_message
+            if current_slot.channel_name != channel:
+                current.channel = f"{current_slot.channel_name} {ANSI.Yellow}({channel} {message}){ANSI.DefaultColor}"
+            else:
+                current.channel = f"{current_slot.channel_name} {ANSI.Yellow}({message}){ANSI.DefaultColor}"
             current.bitrate = " "
             current.resolution = " "
             current.timer = " "
@@ -307,7 +310,7 @@ class DisplayController:
         if keypress in map(str, range(10)):
             try:
                 slot_index = int(keypress) - 1
-                self.__response_queue.put((slot_index, None))
+                self.__response_queue.put((Config.MSG_SLOT, slot_index))
                 message_handler("Notice", f"Halting slot {keypress}...")
             except ValueError:
                 message_handler("Warning", f"Halting slot {keypress} not possible...")
@@ -386,7 +389,7 @@ class Display:
 
     def __create_header(self):
         self.__create_line(Draw.Rounded, top=True)
-        self.__create_text_line(self.__header_text, Draw.Rounded)
+        self.__create_text_line(self.__header_text, Draw.Rounded, left_align=False)
         self.__create_line(Draw.Rounded)
         self.__create_text_line(self.__header_health_text, Draw.Rounded)
         self.__create_line(Draw.Rounded, top=False)
@@ -418,7 +421,7 @@ class Display:
         divider = draw_class.B
         if end:
             divider = draw_class.V
-        text = ANSI.trim(text, (self.__w - 4), pad=True)
+        text = ANSI.trim(text, (self.__w - 4), pad=True, align=ANSI.Left if left_align else ANSI.Centre)
         self.__print_row(divider + f" {text} " + divider)
 
     def __create_tick_text_line(self, cols: SlotColumns, ticks, draw_class, end=True):
@@ -428,7 +431,9 @@ class Display:
         result = ""
         if ticks is not None:
             if sum(ticks) + (len(ticks) * 3) > (self.__w - 4):
-                pass
+                short_ticks = [tick - 1 for tick in ticks if tick > 2]
+                if sum(short_ticks) < sum(ticks):
+                    self.__create_tick_text_line(cols, short_ticks, draw_class, end)
             else:
                 for tick, col in zip(ticks, fields(cols)):
                     result += " " + ANSI.trim(getattr(cols, col.name), tick, pad=True) + " " + divider
@@ -458,7 +463,9 @@ class Display:
                 tick_mark = draw_class.MB
         if ticks is not None:
             if sum(ticks) + (len(ticks) * 3) > (self.__w - 4):
-                pass
+                short_ticks = [tick - 1 for tick in ticks if tick > 2]
+                if sum(short_ticks) < sum(ticks):
+                    self.__create_line(draw_class, top, end, short_ticks)
             else:
                 for tick in ticks:
                     result += (tick + 2) * draw_line + tick_mark

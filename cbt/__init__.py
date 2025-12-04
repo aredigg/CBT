@@ -12,6 +12,7 @@ class Config:
 
     REC = "RECORDING"
     UNR = "UNRESPONSIVE"
+    FIN = "FINISHED"
 
     MSG_DISP = -1
     MSG_SLOT = -2

@@ -16,6 +16,10 @@ class ANSI:
     Dim = "\033[2m"
     ResetBold = ResetDim = "\033[22m"
 
+    Left = "LEFT"
+    Right = "RIGHT"
+    Centre = "CENTRE"
+
     @staticmethod
     def color(hex: str) -> str:
         hex = hex.removeprefix("#")
@@ -138,7 +142,7 @@ class ANSI:
         return ANSI.ulen(ANSI.remove_ansi(text))
 
     @staticmethod
-    def trim(text: str, length: int, pad=False) -> str:
+    def trim(text: str, length: int, pad=False, align=Left) -> str:
         if not text:
             return "" if not pad else " " * length
         code = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
@@ -155,11 +159,25 @@ class ANSI:
         while ANSI.len(text) > length:
             text = text[:-1]
         if pad:
-            while ANSI.len(text) < length:
-                text += " " * (length - ANSI.len(text))
+            ANSI.pad(text, length, align)
         for i, ansi_code in ansi_codes:
             if i < len(text):
                 text = text[:i] + ansi_code + text[i:]
             else:
                 text += ansi_code
+        return text
+
+    @staticmethod
+    def pad(text: str, length: int, align, padder=" "):
+        padder = padder[1]
+        while ANSI.len(text) < length:
+            if align == ANSI.Left:
+                text += padder * (length - ANSI.len(text))
+            elif align == ANSI.Right:
+                text = padder * (length - ANSI.len(text)) + text
+            elif align == ANSI.Centre:
+                if ANSI.len(text) % 2 == 0:
+                    text = padder + text
+                else:
+                    text = text + padder
         return text
