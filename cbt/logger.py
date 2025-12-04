@@ -19,6 +19,7 @@ class Logger:
             Logger.ERR: [],
         }
         self.__log_file = log_file
+        self.__download_file_name = ""
 
     def __trim(self):
         for q in self.__messages:
@@ -45,6 +46,11 @@ class Logger:
         if message.startswith("ERROR: "):
             self.__append(Logger.ERR, message.removeprefix("ERROR: "))
         elif message.startswith("[download] "):
+            if "Destination:" in message:
+                try:
+                    _, _, self.__download_file_name = message.strip().split()
+                except ValueError:
+                    pass
             self.__append(Logger.DBG, message.replace("[download] ", "Download: "))
         else:
             message = self.__split(message)
@@ -90,3 +96,6 @@ class Logger:
         ]
         [messages.clear() for messages in self.__messages.values()]  # Comprehende?
         return result
+
+    def download_filename(self):
+        return self.__download_file_name

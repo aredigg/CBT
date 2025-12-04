@@ -289,7 +289,7 @@ class DisplayController:
                             )
                 else:
                     self.__slot_columns[slot_index].slot.timer = (
-                        ANSI.Red + self.__slot_columns[slot_index].slot.timer + ANSI.DefaultColor
+                        ANSI.BrBlack + self.__slot_columns[slot_index].slot.timer + ANSI.DefaultColor
                     )
                     self.__slot_columns[slot_index].slot.status = StatusIcons.error
 

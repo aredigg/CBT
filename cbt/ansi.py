@@ -59,6 +59,7 @@ class ANSI:
 
     Red = "\033[31m"
     Yellow = "\033[33m"
+    BrBlack = "\033[90m"
     Gold = color("D4AF37")
     Silver = color("8C8C96")
     Bronze = color("665D1E")
@@ -159,7 +160,7 @@ class ANSI:
         while ANSI.len(text) > length:
             text = text[:-1]
         if pad:
-            ANSI.pad(text, length, align)
+            text = ANSI.pad(text, length, align)
         for i, ansi_code in ansi_codes:
             if i < len(text):
                 text = text[:i] + ansi_code + text[i:]
@@ -169,13 +170,15 @@ class ANSI:
 
     @staticmethod
     def pad(text: str, length: int, align, padder=" "):
-        padder = padder[1]
-        while ANSI.len(text) < length:
-            if align == ANSI.Left:
+        padder = padder[0] if len(padder) > 0 else " "
+        if align == ANSI.Left:
+            while ANSI.len(text) < length:
                 text += padder * (length - ANSI.len(text))
-            elif align == ANSI.Right:
+        elif align == ANSI.Right:
+            while ANSI.len(text) < length:
                 text = padder * (length - ANSI.len(text)) + text
-            elif align == ANSI.Centre:
+        elif align == ANSI.Centre:
+            while ANSI.len(text) < length:
                 if ANSI.len(text) % 2 == 0:
                     text = padder + text
                 else:

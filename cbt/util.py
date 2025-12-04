@@ -36,7 +36,7 @@ def get_time(posix=0) -> datetime:
 
 def get_difference(dt_a: datetime | None, dt_b: datetime | None = None) -> str:
     if dt_a is None:
-        return ANSI.Dim + "00:00:00" + ANSI.ResetDim
+        return ANSI.BrBlack + "00:00:00" + ANSI.DefaultColor
     if dt_b is None:
         dt_b = get_time()
     delta = abs(dt_b - dt_a)

@@ -3,8 +3,8 @@ import queue
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from multiprocessing import Queue, RLock
-from threading import Thread
+from queue import Queue
+from threading import RLock, Thread
 
 from cbt.ansi import ANSI
 

@@ -56,6 +56,9 @@ class Processor:
             return True, ("", "", self.__error_message)
         return False, ("", "", "")
 
+    def get_filename(self) -> str:
+        return self.__logger.download_filename()
+
     def get_resolution(self):
         return (
             f"{self.__current.width}x{self.__current.height}"
