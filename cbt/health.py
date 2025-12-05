@@ -11,7 +11,12 @@ from . import Config, util
 class Health:
     DRIVE_OUTD = "O"
     DRIVE_TEMP = "T"
-    TEST_IP = "1.1.1.1"
+    TEST_IPS = [
+        "1.1.1.1",
+        "9.9.9.9",
+        "8.8.8.8",
+        "223.5.5.5",
+    ]
 
     @dataclass
     class Drive:
@@ -82,19 +87,25 @@ class Health:
     def internet(self):
         up = False
         addr = None
-        err = None
-        try:
-            s = socket.create_connection((Health.TEST_IP, 53), timeout=10)
-            up = True
-            addr = s.getsockname()[0]
-        except TimeoutError as e:
-            err = str(e)
-        except ConnectionRefusedError as e:
-            err = str(e)
-            up = True
-        except OSError as e:
-            err = str(e)
-            pass
-        except Exception as e:
-            err = repr(e)
+        err = "No connection"
+        for test_ip in Health.TEST_IPS:
+            if not up and err is not None:
+                try:
+                    s = socket.create_connection((test_ip, 53), timeout=10)
+                    up = True
+                    err = None
+                    addr = s.getsockname()[0]
+                except TimeoutError as e:
+                    err = str(e)
+                except ConnectionRefusedError as e:
+                    err = str(e)
+                    up = True
+                except OSError as e:
+                    err = str(e)
+                except Exception as e:
+                    err = repr(e)
+            if err:
+                if err.startswith("[") and "]" in err:
+                    err = err.split("]", maxsplit=1)[1]
+                err = err.capitalize()
         return Health.Internet(addr, up, err)

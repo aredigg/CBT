@@ -55,3 +55,7 @@ def hours_ago(dt: datetime, hrs) -> bool:
 
 def mins_ago(dt: datetime, mins=1) -> bool:
     return dt < get_time() - timedelta(minutes=mins)
+
+
+def seconds_ago(dt: datetime, secs=1) -> bool:
+    return dt < get_time() - timedelta(seconds=secs)

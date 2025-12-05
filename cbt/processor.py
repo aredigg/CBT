@@ -21,7 +21,7 @@ class Processor:
         self.__error_message = None
         Config.load()
         if output_directory := Config.getstr("output_directory"):
-            Config.add_paths(home=output_directory + "/home")
+            Config.add_paths(home=output_directory)
         if temporary_storage := Config.getstr("temporary_storage"):
             Config.add_paths(temp=temporary_storage + "/temp")
             log_file = f"{temporary_storage}/logfile.{slot_index:02}"
@@ -38,6 +38,7 @@ class Processor:
         self.__current = None
 
     def extract(self, prefix, channel_name) -> bool:
+        self.__logger.info(f"[CBT({self.__slot_index:02})] {channel_name}: Extracting data")
         if info := self.__processor.extract_info(prefix + channel_name, download=False, process=False):
             self.__current = CurrentChannel(
                 *(self.__get_details(info) + self.__get_best_format(info.get("formats") or {}) + self.__get_status({}))
@@ -48,6 +49,9 @@ class Processor:
                     return False
             return True
         return False
+
+    def get_logger(self) -> Logger:
+        return self.__logger
 
     def get_error(self) -> tuple[bool, tuple[str, str, str]]:
         if self.__logger.waiting(Logger.ERR):
@@ -73,37 +77,27 @@ class Processor:
         result = False
         response_message = ""
         if self.__current is not None:
-            try:
-                self.__response_queue.put((self.__slot_index, replace(self.__current)))
-                result = self.__processor.download([self.__current.original_url])
-            except RejectedVideoReached as e:
-                response_message = str(e)
-            except Exception as e:
-                response_message = repr(e)
-            finally:
+            self.__logger.info(f"[CBT({self.__slot_index:02})] {self.__current.id}: Attempt to download")
+            if self.__current is not None:
                 try:
-                    self.__response_queue.put(
-                        (
-                            Config.MSG_DISP,
-                            StatusBarMessage(
-                                important="Notice", message=f"Releasing lock (Slot {self.__slot_index + 1})"
-                            ),
-                        )
-                    )
-                    self.__process_lock.release()
-                    self.__process_lock_status = False
-                    self.__response_queue.put(
-                        (
-                            Config.MSG_DISP,
-                            StatusBarMessage(
-                                important="Notice", message=f"Released lock (Slot {self.__slot_index + 1})"
-                            ),
-                        )
-                    )
-                except AssertionError:
-                    pass  # lock not owned
-                except ValueError:
-                    pass
+                    self.__response_queue.put((self.__slot_index, replace(self.__current)))
+                    result = self.__processor.download([self.__current.original_url])
+                except RejectedVideoReached as e:
+                    response_message = str(e)
+                except Exception as e:
+                    response_message = repr(e)
+                finally:
+                    try:
+                        self.__logger.debug(f"[CBT({self.__slot_index:02})] {self.__current.id}: Releasing lock")
+                        self.__process_lock.release()
+                        self.__process_lock_status = False
+                        self.__logger.debug(f"[CBT({self.__slot_index:02})] {self.__current.id}: Released lock")
+                    except AssertionError as e:
+                        self.__logger.debug(f"[CBT({self.__slot_index:02})] {self.__current.id}: {str(e)}")
+                    except RuntimeError as e:
+                        self.__logger.debug(f"[CBT({self.__slot_index:02})] {self.__current.id}: {str(e)}")
+                    except ValueError as e:
+                        self.__logger.debug(f"[CBT({self.__slot_index:02})] {self.__current.id}: {str(e)}")
         return not bool(result), ("", "", response_message)
 
     def __common_hook(self, data):
@@ -111,7 +105,7 @@ class Processor:
             *(
                 self.__get_details(data.get("info_dict") or {})
                 + self.__get_format(data.get("info_dict") or {})
-                + self.__get_status(data)
+                + self.__get_status(data or {})
             )
         )
         self.__response_queue.put((self.__slot_index, replace(self.__current)))
@@ -129,6 +123,8 @@ class Processor:
                     StatusBarMessage(important="Notice", message=f"Acquiring lock (Slot {self.__slot_index + 1})"),
                 )
             )
+            if self.__current is not None:
+                self.__logger.debug(f"[CBT({self.__slot_index:02})] {self.__current.id}: Acquiring lock")
             self.__process_lock_status = True
             self.__process_lock.acquire()
             self.__response_queue.put(
@@ -137,6 +133,8 @@ class Processor:
                     StatusBarMessage(important="Notice", message=f"Acquired lock (Slot {self.__slot_index + 1})"),
                 )
             )
+            if self.__current is not None:
+                self.__logger.debug(f"[CBT({self.__slot_index:02})] {self.__current.id}: Acquired lock")
 
     def __get_status(self, data):
         return (

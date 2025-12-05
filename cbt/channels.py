@@ -105,6 +105,34 @@ class Channels:
         if len(self.__channels) < 1:
             self.__status = "No channels imported"
             self.__status_value = 3
+        self.__remove_duplicates()
+
+    def __remove_duplicates(self):
+        seen = {}
+        result = []
+        for channel in self.__channels:
+            if channel.name not in seen:
+                seen[channel.name] = len(result)
+                result.append(channel)
+            else:
+                index = seen[channel.name]
+                keep: Channel = result[index]
+                result[index] = Channel(
+                    name=keep.name,
+                    rank=keep.rank,
+                    last_attempt=keep.last_attempt if keep.last_attempt is not None else channel.last_attempt,
+                    last_bitrate=keep.last_bitrate if keep.last_bitrate is not None else channel.last_bitrate,
+                    last_complete=keep.last_complete if keep.last_complete is not None else channel.last_complete,
+                    last_download=keep.last_download if keep.last_download is not None else channel.last_download,
+                    last_error=keep.last_error if keep.last_error is not None else channel.last_error,
+                    last_error_message=keep.last_error_message
+                    if keep.last_error_message is not None
+                    else channel.last_error_message,
+                    last_resolution=keep.last_resolution
+                    if keep.last_resolution is not None
+                    else channel.last_resolution,
+                )
+        self.__channels = result
 
     def __slot_callback(self, q):
         while self.__running:
@@ -169,14 +197,20 @@ class Channels:
         self.__status_value = 2
         return []
 
-    def __next_channel(self, current_index, slots):
+    def __next_channel(self, current_index, slots, recursions):
+        if recursions > 3:
+            time.sleep(
+                10
+            )  # simple hack, we can recurse almost 1000 times, so sooner or later it should be more channels
         ch = self.__channels[current_index]
         while isinstance(ch.last_complete, datetime) and util.same_date(ch.last_complete):
             current_index = (current_index + 1) % len(self.__channels)
             ch = self.__channels[current_index]
         for slot in slots:
-            if slot.check_name(ch.name):
-                current_index, ch = self.__next_channel((current_index + 1) % len(self.__channels), slots)
+            if self.__running and slot.check_name(ch.name):
+                current_index, ch = self.__next_channel(
+                    (current_index + 1) % len(self.__channels), slots, recursions + 1
+                )
         return current_index, ch
 
     def manager(self) -> bool:
@@ -196,7 +230,7 @@ class Channels:
             try:
                 self.__health_check(q, health)
                 for slot in slots:
-                    channel_index, channel = self.__next_channel(channel_index, slots)
+                    channel_index, channel = self.__next_channel(channel_index, slots, 0)
                     if controller.shutdown_requested():
                         self.__running = False
                     if self.__running and not slot.busy():
@@ -204,10 +238,19 @@ class Channels:
                         slot.process(channel)
                         channel_index = (channel_index + 1) % len(self.__channels)
                     if util.hours_ago(offline_checkpoint, self.__offline_window):
+                        self.__save_channels()
                         offline_checkpoint = util.get_time()
                         channel_index = 0
             except KeyboardInterrupt:
                 time.sleep(Config.KILL)
+                self.__running = False
+            except RecursionError as e:
+                self.__status_value = 1
+                self.__status = str(e)
+                self.__running = False
+            except Exception as e:
+                self.__status_value = 1
+                self.__status = repr(e)
                 self.__running = False
         for slot in slots:
             slot.shutdown()

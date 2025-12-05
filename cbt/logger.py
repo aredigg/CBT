@@ -1,7 +1,7 @@
 import os
 
 from .ansi import ANSI
-from .util import time_str
+from .util import get_time, seconds_ago, time_str
 
 
 class Logger:
@@ -10,7 +10,7 @@ class Logger:
     WRN: str = "warnings"
     ERR: str = "errors"
 
-    def __init__(self, log_file=None, max_len=100) -> None:
+    def __init__(self, log_file=None, max_len=100, flush_lines=10, flush_interval=60) -> None:
         self.__max_len = max_len
         self.__messages = {
             Logger.DBG: [],
@@ -18,6 +18,9 @@ class Logger:
             Logger.WRN: [],
             Logger.ERR: [],
         }
+        self.__flush_config = (flush_interval, flush_lines)
+        self.__last_flush = get_time()
+        self.__log_buffer = []
         self.__log_file = log_file
         self.__download_file_name = ""
 
@@ -60,7 +63,10 @@ class Logger:
 
     def __write_to_log(self, kind, message):
         extractor, channel, message = message
-        if self.__log_file is not None:
+        self.__log_buffer.append((kind, extractor, channel, message))
+        if self.__log_file is not None and (
+            len(self.__log_buffer) > self.__flush_config[0] or seconds_ago(self.__last_flush, self.__flush_config[1])
+        ):
             if not os.path.isfile(self.__log_file):
                 with open(self.__log_file, "w") as lf:
                     lf.write("Timestamp;Kind;Extractor;Channel;Message\n")

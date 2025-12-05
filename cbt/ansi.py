@@ -5,6 +5,7 @@ import unicodedata
 class ANSI:
     SetupClearScreen = "\033[?1049h\033[?25l\033[0m\033[2J"
     ReturnScreen = "\033[?25h\033[?1049l"
+    ClearScreen = "\033[0m\033[2J"
 
     DefaultColor = "\033[39m"
     BGDefaultColor = "\033[49m"

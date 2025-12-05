@@ -78,6 +78,7 @@ class SlotColumns:
     previous: str
     status: str
     timer: str
+    filesize: str
     resolution: str
     bitrate: str
     rank: str
@@ -113,12 +114,13 @@ class DisplayController:
         "Previous",
         " ",
         "Timer",
+        "Size (MB)",
         "Resolution",
         "Bitrate",
         " ",
         "Channel",
     )
-    slot_columns_len = [4, 10, 1, 8, 10, 7, 1, 20]
+    slot_columns_len = [4, 10, 1, 8, 9, 10, 7, 1, 20]
     assert len(slot_columns_len) == len(fields(SlotColumns))
     POSTPROCESSES = {"Merger": "Merge", "MoveFiles": "Move", "FixupM3u8": "Normalize", "": "Unknown"}
 
@@ -187,6 +189,7 @@ class DisplayController:
             previous=" ",
             status=StatusIcons.inactive,
             timer=" ",
+            filesize=" ",
             resolution=" ",
             bitrate=" ",
             rank=" ",
@@ -194,10 +197,15 @@ class DisplayController:
         )
 
     def __process_display_response(self, display, response):
+        from .slot import FileInfo
+
         if isinstance(response, StatusBarMessage):
             display.status_bar_update(important=response.important, message=response.message)
         if isinstance(response, HealthBar):
             display.health_bar_update(bar_text=response.bar)
+        if isinstance(response, FileInfo):
+            if response.slot_index in self.__slot_columns:
+                self.__slot_columns[response.slot_index].slot.filesize = f"{response.filesize >> 20:>8}"
 
     def __process_response(self, slot_index, response):
         from .slot import CurrentSlot
@@ -237,6 +245,7 @@ class DisplayController:
             current.bitrate = " "
             current.resolution = " "
             current.timer = " "
+            current.filesize = " "
         return current_slot.is_downloading
 
     def __update_channel_slot(self, slot_index, current_channel: CurrentChannel):
@@ -318,7 +327,7 @@ class DisplayController:
 
 
 class Display:
-    dummy = SlotColumns(" ", " ", " ", " ", " ", " ", " ", " ")
+    dummy = SlotColumns(" ", " ", " ", " ", " ", " ", " ", " ", " ")
 
     def __init__(self, header_text) -> None:
         self.__w, self.__h = size()
@@ -353,6 +362,7 @@ class Display:
     def check_size_changed(self) -> bool:
         if (self.__w, self.__h) != size():
             self.__w, self.__h = size()
+            print(ANSI.ClearScreen)
             return True
         return False
 

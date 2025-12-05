@@ -41,6 +41,8 @@ class CapturedProcess:
 class FileInfo:
     slot_index: int
     filename: str
+    filesize: int
+    expected: int
 
 
 class SubprocessMonitor:
@@ -72,9 +74,34 @@ class SubprocessMonitor:
             if counter < 0:
                 self.__process_dead_processes()
                 self.__scan_for_children()
+                self.__update_filesizes()
                 counter = SubprocessMonitor.count
             time.sleep(Config.POLL)
             counter -= 1
+
+    def __update_filesizes(self):
+        for pid, proc in self.__subprocesses.items():
+            if proc.filename:
+                filesize = None
+                for filename in [proc.filename, proc.filename + ".part"]:
+                    try:
+                        if filesize is None:
+                            filesize = os.path.getsize(filename)
+                    except (FileNotFoundError, OSError):
+                        pass
+                    if filesize is not None and filesize > proc.filesize:
+                        self.__subprocesses[pid] = replace(proc, filesize=filesize)
+                        self.__response_queue.put(
+                            (
+                                Config.MSG_DISP,
+                                FileInfo(
+                                    slot_index=proc.slot_index if proc.slot_index is not None else -1,
+                                    filename=proc.filename,
+                                    filesize=filesize or proc.filesize,
+                                    expected=0,
+                                ),
+                            )
+                        )
 
     def __scan_for_children(self):
         result = subprocess.run(["pgrep", "-P", str(os.getpid())], capture_output=True, text=True)
@@ -214,6 +241,14 @@ class Slot:
                         slot_status.has_error, slot_status.status_message = self.__processor.get_error()
                         slot_status.is_complete = False
                         slot_status.is_downloading = False
+                        if filename := self.__processor.get_filename():
+                            try:
+                                os.remove(filename)
+                                self.__processor.get_logger().debug(f"Removed temporary file {filename}")
+                            except FileNotFoundError as e:
+                                self.__processor.get_logger().error(str(e))
+                            except Exception as e:
+                                self.__processor.get_logger().error(repr(e))
                     if slot_status.is_complete:
                         channel.last_complete = util.get_time()
                         channel.last_resolution = self.__processor.get_resolution()
@@ -242,7 +277,7 @@ class Slot:
             filename = None
             if self.__busy:
                 filename = self.__processor.get_filename() if self.__processor.get_filename() != filename else None
-                self.__response_queue.put((Config.MSG_SLOT, FileInfo(self.__slot_index, filename or "")))
+                self.__response_queue.put((Config.MSG_SLOT, FileInfo(self.__slot_index, filename or "", 0, 0)))
             else:
                 filename = None
             time.sleep(1)

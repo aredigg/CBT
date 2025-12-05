@@ -1,4 +1,4 @@
-__version__ = "3.01"
+__version__ = "3.03"
 __author__ = "The Duck"
 __program_name__ = "Channel Broadcast Tracker"
 
