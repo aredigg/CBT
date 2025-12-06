@@ -105,3 +105,6 @@ class Logger:
 
     def download_filename(self):
         return self.__download_file_name
+
+    def set_download_filename(self, filename):
+        self.__download_file_name = filename or ""

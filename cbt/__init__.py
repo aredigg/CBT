@@ -96,6 +96,13 @@ class Config:
         return None
 
     @staticmethod
+    def getbool(setting: str) -> bool | None:
+        value = Config.__get(setting)
+        if isinstance(value, bool):
+            return value
+        return None
+
+    @staticmethod
     def set_args(args: list[str]):
         for i in range(1, len(args) - 1):
             if args[i] == "=" and i < len(args) - 1:

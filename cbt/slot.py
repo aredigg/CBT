@@ -1,7 +1,9 @@
 import os
 import signal
 import subprocess
+import sys
 import time
+import traceback
 from dataclasses import dataclass, replace
 from datetime import datetime
 from queue import Empty as EmptyQueue
@@ -121,15 +123,15 @@ class SubprocessMonitor:
                         filename=None,
                         filesize=0,
                     )
-                    self.__response_queue.put(
-                        (
-                            Config.MSG_DISP,
-                            StatusBarMessage(
-                                important="Notice",
-                                message=f"Captured Child Process PID {pid}",
-                            ),
-                        )
-                    )
+                    # self.__response_queue.put(
+                    #     (
+                    #         Config.MSG_DISP,
+                    #         StatusBarMessage(
+                    #             important="Notice",
+                    #             message=f"Captured Child Process PID {pid}",
+                    #         ),
+                    #     )
+                    # )
             except ValueError:
                 pass
         for slot_index, filename in self.__filenames.items():
@@ -241,14 +243,7 @@ class Slot:
                         slot_status.has_error, slot_status.status_message = self.__processor.get_error()
                         slot_status.is_complete = False
                         slot_status.is_downloading = False
-                        if filename := self.__processor.get_filename():
-                            try:
-                                os.remove(filename)
-                                self.__processor.get_logger().debug(f"Removed temporary file {filename}")
-                            except FileNotFoundError as e:
-                                self.__processor.get_logger().error(str(e))
-                            except Exception as e:
-                                self.__processor.get_logger().error(repr(e))
+                        self.__remove_temp_file()
                     if slot_status.is_complete:
                         channel.last_complete = util.get_time()
                         channel.last_resolution = self.__processor.get_resolution()
@@ -259,18 +254,41 @@ class Slot:
                     self.__response_queue.put((Config.MSG_CHAN, replace(channel)))
                     self.__response_queue.put((self.__slot_index, replace(slot_status)))
                     self.__response_queue.put((self.__slot_index, Config.FIN))
+                    self.__response_queue.put(
+                        (
+                            Config.MSG_DISP,
+                            StatusBarMessage(
+                                important="Notice", message=f"{channel.name}: {slot_status.status_message[2] or 'OK'}"
+                            ),
+                        )
+                    )
                 except KeyboardInterrupt:
                     self.__response_queue.put(
                         (Config.MSG_DISP, StatusBarMessage(important="Notice", message="KeyboardInterrupt"))
                     )
                     self.shutdown()
                 except Exception as e:
+                    print(traceback.format_exc(), file=sys.stderr)
                     self.__response_queue.put((Config.MSG_DISP, StatusBarMessage(important="Error", message=str(e))))
                 finally:
                     self.__busy = False
                     time.sleep(Config.POLL)
             else:
                 self.__channel_event.clear()
+
+    def __remove_temp_file(self):
+        if filename := self.__processor.get_filename():
+            try:
+                for fn in [filename, filename + ".part"]:
+                    os.remove(fn)
+                    self.__processor.set_filename(None)
+                    self.__processor.get_logger().info(f"Removed temporary file {fn}")
+            except FileNotFoundError as e:
+                self.__processor.get_logger().debug(str(e))
+            except Exception as e:
+                print(traceback.format_exc(), file=sys.stderr)
+
+                self.__processor.get_logger().error(repr(e))
 
     def __worker_monitor(self):
         while not self.__shutdown:

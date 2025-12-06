@@ -3,6 +3,7 @@ import select
 import sys
 import termios
 import time
+import traceback
 import tty
 from dataclasses import dataclass, fields
 from datetime import datetime
@@ -12,6 +13,7 @@ from threading import Thread
 
 from . import Config, __program_name__, __version__, util
 from .ansi import ANSI
+from .debug import Debug
 
 
 @dataclass
@@ -177,6 +179,8 @@ class DisplayController:
                     raise KeyboardInterrupt
                 except queue.Empty:
                     pass
+                except Exception:
+                    print(traceback.format_exc(), file=sys.stderr)
                 if display.check_size_changed() or self.__update_timer() or dirty:
                     display.update()
                     dirty = False
@@ -200,6 +204,7 @@ class DisplayController:
         from .slot import FileInfo
 
         if isinstance(response, StatusBarMessage):
+            Debug.write(f"{response.important}: {response.message}")
             display.status_bar_update(important=response.important, message=response.message)
         if isinstance(response, HealthBar):
             display.health_bar_update(bar_text=response.bar)
@@ -319,8 +324,11 @@ class DisplayController:
         if keypress in map(str, range(10)):
             try:
                 slot_index = int(keypress) - 1
-                self.__response_queue.put((Config.MSG_SLOT, slot_index))
-                message_handler("Notice", f"Halting slot {keypress}...")
+                if slot_index in self.__slot_columns:
+                    self.__response_queue.put((Config.MSG_SLOT, slot_index))
+                    message_handler("Notice", f"Halting slot {keypress}...")
+                else:
+                    message_handler("Warning", f"Halting slot {keypress} not existing...")
             except ValueError:
                 message_handler("Warning", f"Halting slot {keypress} not possible...")
         return False

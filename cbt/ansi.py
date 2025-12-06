@@ -7,6 +7,9 @@ class ANSI:
     ReturnScreen = "\033[?25h\033[?1049l"
     ClearScreen = "\033[0m\033[2J"
 
+    SwitchMainScreen = "\0337\033[?1049l"
+    SwitchAltnScreen = "\033[?1049h\0338"
+
     DefaultColor = "\033[39m"
     BGDefaultColor = "\033[49m"
 

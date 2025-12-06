@@ -1,3 +1,5 @@
+import sys
+import traceback
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
@@ -63,6 +65,9 @@ class Processor:
     def get_filename(self) -> str:
         return self.__logger.download_filename()
 
+    def set_filename(self, filename):
+        self.__logger.set_download_filename(filename)
+
     def get_resolution(self):
         return (
             f"{self.__current.width}x{self.__current.height}"
@@ -85,6 +90,7 @@ class Processor:
                 except RejectedVideoReached as e:
                     response_message = str(e)
                 except Exception as e:
+                    print(traceback.format_exc(), file=sys.stderr)
                     response_message = repr(e)
                 finally:
                     try:

@@ -1,14 +1,15 @@
 import os
 import queue
+import sys
 import time
+import traceback
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from queue import Queue
 from threading import RLock, Thread
 
-from cbt.ansi import ANSI
-
 from . import Config, util
+from .ansi import ANSI
 from .display import DisplayController, HealthBar, StatusBarMessage
 from .health import Health
 from .slot import Slot, SubprocessMonitor
@@ -251,6 +252,7 @@ class Channels:
             except Exception as e:
                 self.__status_value = 1
                 self.__status = repr(e)
+                print(traceback.format_exc(), file=sys.stderr)
                 self.__running = False
         for slot in slots:
             slot.shutdown()
