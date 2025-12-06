@@ -1,5 +1,3 @@
-import sys
-import traceback
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
@@ -7,6 +5,7 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import RejectedVideoReached
 
 from . import Config
+from .debug import Debug
 from .display import CurrentChannel, StatusBarMessage
 from .logger import Logger
 
@@ -90,7 +89,7 @@ class Processor:
                 except RejectedVideoReached as e:
                     response_message = str(e)
                 except Exception as e:
-                    print(traceback.format_exc(), file=sys.stderr)
+                    Debug.writetb()
                     response_message = repr(e)
                 finally:
                     try:
@@ -104,6 +103,7 @@ class Processor:
                         self.__logger.debug(f"[CBT({self.__slot_index:02})] {self.__current.id}: {str(e)}")
                     except ValueError as e:
                         self.__logger.debug(f"[CBT({self.__slot_index:02})] {self.__current.id}: {str(e)}")
+        Debug.write(f"({not bool(result)}) ({('', '', response_message)})")
         return not bool(result), ("", "", response_message)
 
     def __common_hook(self, data):

@@ -1,8 +1,6 @@
 import os
 import queue
-import sys
 import time
-import traceback
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from queue import Queue
@@ -10,6 +8,7 @@ from threading import RLock, Thread
 
 from . import Config, util
 from .ansi import ANSI
+from .debug import Debug
 from .display import DisplayController, HealthBar, StatusBarMessage
 from .health import Health
 from .slot import Slot, SubprocessMonitor
@@ -229,12 +228,10 @@ class Channels:
         health = Health()
         while self.__running and self.__status_value == 0:
             try:
-                self.__health_check(q, health)
+                self.__health_check(q, health, controller.completion_requested())
                 for slot in slots:
                     channel_index, channel = self.__next_channel(channel_index, slots, 0)
-                    if controller.shutdown_requested():
-                        self.__running = False
-                    if self.__running and not slot.busy():
+                    if self.__running and not slot.busy() and not controller.completion_requested():
                         channel.rank = self.__get_rank(channel_index)
                         slot.process(channel)
                         channel_index = (channel_index + 1) % len(self.__channels)
@@ -242,6 +239,10 @@ class Channels:
                         self.__save_channels()
                         offline_checkpoint = util.get_time()
                         channel_index = 0
+                    if controller.shutdown_requested() or (
+                        controller.completion_requested() and all(not slot.busy() for slot in slots)
+                    ):
+                        self.__running = False
             except KeyboardInterrupt:
                 time.sleep(Config.KILL)
                 self.__running = False
@@ -252,7 +253,7 @@ class Channels:
             except Exception as e:
                 self.__status_value = 1
                 self.__status = repr(e)
-                print(traceback.format_exc(), file=sys.stderr)
+                Debug.writetb()
                 self.__running = False
         for slot in slots:
             slot.shutdown()
@@ -270,8 +271,8 @@ class Channels:
             return self.__status
         return "OK"
 
-    def __health_check(self, q, health: Health):
-        if not self.__last_health_check or util.mins_ago(self.__last_health_check, self.__health_interval):
+    def __health_check(self, q, health: Health, trigger: bool):
+        if not self.__last_health_check or util.mins_ago(self.__last_health_check, self.__health_interval) or trigger:
             self.__last_health_check = util.get_time()
             health_bar = [f"Channels: {len(self.__channels)}"]
             health_bar.append("| Free space:")
@@ -287,21 +288,13 @@ class Channels:
                             ),
                         )
                     )
-                if not drive.available:
+                if not drive.available or drive.inaccesible:
                     q.put(
                         (
                             Config.MSG_DISP,
                             StatusBarMessage(
-                                important="Warning", message=f"Drive for {drive.directory}: not available"
-                            ),
-                        )
-                    )
-                if drive.inaccesible:
-                    q.put(
-                        (
-                            Config.MSG_DISP,
-                            StatusBarMessage(
-                                important="Warning", message=f"Drive for {drive.directory}: not inaccesible"
+                                important="Warning",
+                                message=f"Drive for {drive.directory}: not available or inaccesible",
                             ),
                         )
                     )
@@ -338,6 +331,8 @@ class Channels:
                     )
                 )
                 health_bar.append(f"| YT-DLP {ytdlp_version.latest} update available")
+            if Debug.mode():
+                health_bar.append(f"| Debug {ANSI.Green}ON{ANSI.DefaultColor}")
             q.put(
                 (
                     Config.MSG_DISP,

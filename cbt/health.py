@@ -2,11 +2,11 @@ import os
 import socket
 import subprocess
 import sys
-import traceback
 from dataclasses import dataclass
 from importlib.metadata import version
 
 from . import Config, util
+from .debug import Debug
 
 
 class Health:
@@ -104,7 +104,7 @@ class Health:
                 except OSError as e:
                     err = str(e)
                 except Exception as e:
-                    print(traceback.format_exc(), file=sys.stderr)
+                    Debug.writetb()
                     err = repr(e)
             if err:
                 if err.startswith("[") and "]" in err:

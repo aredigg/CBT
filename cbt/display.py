@@ -3,7 +3,6 @@ import select
 import sys
 import termios
 import time
-import traceback
 import tty
 from dataclasses import dataclass, fields
 from datetime import datetime
@@ -126,12 +125,12 @@ class DisplayController:
     assert len(slot_columns_len) == len(fields(SlotColumns))
     POSTPROCESSES = {"Merger": "Merge", "MoveFiles": "Move", "FixupM3u8": "Normalize", "": "Unknown"}
 
-    def __init__(self, queue, debug_queue=None) -> None:
+    def __init__(self, queue) -> None:
         self.__response_queue = queue
-        self.__debug_queue = debug_queue
         self.__slot_columns: dict[int, SlotStatus] = {}
         self.__listening = False
         self.__shutdown_requested = False
+        self.__completion_requested = False
         self.__loop_counter = DisplayController.loop_counter_init
         self.__update_loop = Thread(
             target=self.__control_loop,
@@ -141,6 +140,9 @@ class DisplayController:
 
     def shutdown_requested(self) -> bool:
         return self.__shutdown_requested
+
+    def completion_requested(self) -> bool:
+        return self.__completion_requested
 
     def halt(self):
         self.__listening = False
@@ -180,7 +182,7 @@ class DisplayController:
                 except queue.Empty:
                     pass
                 except Exception:
-                    print(traceback.format_exc(), file=sys.stderr)
+                    Debug.writetb()
                 if display.check_size_changed() or self.__update_timer() or dirty:
                     display.update()
                     dirty = False
@@ -207,7 +209,10 @@ class DisplayController:
             Debug.write(f"{response.important}: {response.message}")
             display.status_bar_update(important=response.important, message=response.message)
         if isinstance(response, HealthBar):
-            display.health_bar_update(bar_text=response.bar)
+            shutdown_msg = ""
+            if self.__completion_requested or self.__shutdown_requested:
+                shutdown_msg = f"| {ANSI.Yellow}Shutting down...{ANSI.DefaultColor}"
+            display.health_bar_update(bar_text=response.bar + [shutdown_msg])
         if isinstance(response, FileInfo):
             if response.slot_index in self.__slot_columns:
                 self.__slot_columns[response.slot_index].slot.filesize = f"{response.filesize >> 20:>8}"
@@ -306,7 +311,18 @@ class DisplayController:
                         ANSI.BrBlack + self.__slot_columns[slot_index].slot.timer + ANSI.DefaultColor
                     )
                     self.__slot_columns[slot_index].slot.status = StatusIcons.error
-
+                if self.__completion_requested:
+                    for slot_index in self.__slot_columns:
+                        current = self.__slot_columns[slot_index].slot
+                        if not self.__slot_columns[slot_index].is_downloading:
+                            current.previous = " "
+                            current.status = StatusIcons.warning
+                            current.timer = " "
+                            current.filesize = " "
+                            current.resolution = " "
+                            current.bitrate = " "
+                            current.rank = " "
+                            current.channel = " "
             return True
         return False
 
@@ -317,6 +333,9 @@ class DisplayController:
             self.__shutdown_requested = True
             self.__listening = False
             return True
+        if keypress.lower() == "c":
+            message_handler("Notice", "Completing before shutting down...")
+            self.__completion_requested = True
         if keypress == "\x03":  # Ctrl+C
             message_handler("Warning", "Shutting down (KeyboardInterrupt)...")
             self.__listening = False

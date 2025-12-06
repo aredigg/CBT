@@ -1,6 +1,7 @@
 import os
 
 from .ansi import ANSI
+from .debug import Debug
 from .util import get_time, seconds_ago, time_str
 
 
@@ -33,7 +34,7 @@ class Logger:
         extractor = ""
         channel = ""
         parts = message.split()
-        if parts[0].startswith("[") and parts[0].endswith("]"):
+        if parts and parts[0].startswith("[") and parts[0].endswith("]"):
             extractor = parts[0][1:-1]
             if len(parts) > 1:
                 if extractor not in ["download"] and parts[1].endswith(":"):
@@ -67,6 +68,7 @@ class Logger:
         if self.__log_file is not None and (
             len(self.__log_buffer) > self.__flush_config[0] or seconds_ago(self.__last_flush, self.__flush_config[1])
         ):
+            Debug.write(f"{kind} - {extractor}, {channel}, {message}")
             if not os.path.isfile(self.__log_file):
                 with open(self.__log_file, "w") as lf:
                     lf.write("Timestamp;Kind;Extractor;Channel;Message\n")

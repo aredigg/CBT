@@ -1,9 +1,7 @@
 import os
 import signal
 import subprocess
-import sys
 import time
-import traceback
 from dataclasses import dataclass, replace
 from datetime import datetime
 from queue import Empty as EmptyQueue
@@ -11,6 +9,7 @@ from queue import Queue
 from threading import Event, Lock, Thread
 
 from . import Config, util
+from .debug import Debug
 from .display import StatusBarMessage
 from .processor import Processor
 
@@ -123,15 +122,7 @@ class SubprocessMonitor:
                         filename=None,
                         filesize=0,
                     )
-                    # self.__response_queue.put(
-                    #     (
-                    #         Config.MSG_DISP,
-                    #         StatusBarMessage(
-                    #             important="Notice",
-                    #             message=f"Captured Child Process PID {pid}",
-                    #         ),
-                    #     )
-                    # )
+                    Debug.write(f"Captured Child Process PID {pid}")
             except ValueError:
                 pass
         for slot_index, filename in self.__filenames.items():
@@ -169,6 +160,7 @@ class SubprocessMonitor:
                 del self.__subprocesses[pid]
 
     def __kill_process(self, slot_index: int):
+        dead_processes = []
         for pid, proc in self.__subprocesses.items():
             if proc.slot_index == slot_index:
                 try:
@@ -178,9 +170,11 @@ class SubprocessMonitor:
                     os.kill(pid, signal.SIGKILL)
                 except OSError:
                     pass
-                self.__response_queue.put((slot_index, Config.UNR))
-                self.__response_queue.put((slot_index, Config.FIN))
-                del self.__subprocesses[pid]
+                dead_processes.append(pid)
+        for pid in dead_processes:
+            self.__response_queue.put((slot_index, Config.UNR))
+            self.__response_queue.put((slot_index, Config.FIN))
+            del self.__subprocesses[pid]
 
     def shutdown(self):
         self.__shutdown = True
@@ -268,7 +262,7 @@ class Slot:
                     )
                     self.shutdown()
                 except Exception as e:
-                    print(traceback.format_exc(), file=sys.stderr)
+                    Debug.writetb()
                     self.__response_queue.put((Config.MSG_DISP, StatusBarMessage(important="Error", message=str(e))))
                 finally:
                     self.__busy = False
@@ -286,8 +280,7 @@ class Slot:
             except FileNotFoundError as e:
                 self.__processor.get_logger().debug(str(e))
             except Exception as e:
-                print(traceback.format_exc(), file=sys.stderr)
-
+                Debug.writetb()
                 self.__processor.get_logger().error(repr(e))
 
     def __worker_monitor(self):

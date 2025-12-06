@@ -5,11 +5,13 @@ import time
 
 from . import Config
 from .channels import Channels
+from .debug import Debug
 
 
 def main(args: list[str]) -> int:
     Config.load()
     Config.set_args(args)
+    Debug.ready()
     try:
         if output_directory := Config.getstr("output_directory"):
             os.makedirs(output_directory, exist_ok=True)
@@ -35,6 +37,7 @@ def main(args: list[str]) -> int:
         print(channels.status_message())
     else:
         print("OK...\033[0m\033[0K\033[1F")
+    Debug.close()
     return channels.status()
 
 
